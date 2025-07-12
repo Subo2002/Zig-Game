@@ -73,6 +73,10 @@
             .hash = "N-V-__8AAIz1QAKx8C8vft2YoHjGTjEAkH2QMR2UiAo8xZJ-",
             .lazy = true,
         },
+        .ZSpline = .{
+            .url = "git+https://github.com/Subo2002/ZSpline.git#b6bf1efab2ead862f54265a0383aeb8747d0373f",
+            .hash = "ZSpline-0.0.0-kRSV_HRdAAD5clIrrZASwxdBNX9oVX4AB2MA0NJ7E1aZ",
+        },
     },
     .paths = .{
         "build.zig",

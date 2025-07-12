@@ -3,6 +3,9 @@ const glfw = @import("zglfw");
 const gpu = @import("zgpu");
 const wgpu = gpu.wgpu;
 const math = @import("zmath");
+const spline = @import("zspline");
+const Vector2I = spline.Vector2I;
+const Vector2B = spline.Vector2B;
 
 /// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
 const lib = @import("Zig_Game_lib");
@@ -37,22 +40,24 @@ const Vertex = struct {
     uv: [2]f32,
 };
 
-fn compCursorPos(window: *glfw.Window, dims: @Vector(2, u16)) @Vector(2, u16) {
-    const texel_size: @Vector(2, f64) = @floatFromInt(dims);
-    const window_size: @Vector(2, f64) = @floatFromInt(@as(@Vector(2, c_int), window.getSize()));
+fn compCursorPos(window: *glfw.Window, dims: Vector2I) Vector2I {
+    const texel_size: Vector2B = dims.toDouble();
+    const size: [2]c_int = window.getSize();
+    const window_size: Vector2B = .init(@floatFromInt(size[0]), @floatFromInt(size[1]));
+    const _cursor_pos: [2]f64 = window.getCursorPos();
+    const cursor_pos: Vector2B = .init(_cursor_pos[0], _cursor_pos[1]);
 
-    const pos: @Vector(2, u16) = @intFromFloat(texel_size * (window.getCursorPos() / window_size));
-    std.debug.print("({}, {})", .{ pos[0], pos[1] });
+    const pos: Vector2I = texel_size.mult(cursor_pos.div(window_size)).trunc().round();
     return pos;
 }
 
-var points: [4]@Vector(2, u16) = [1]@Vector(2, u16){.{ 0, 0 }} ** 4; //@Vector(2, u16) = [1]@Vector(2, u16){.{ 0, 0 }} ** 4;
+var points: [4]Vector2I = [1]Vector2I{.init(0, 0)} ** 4;
 var point_count: u3 = 0;
 fn addPointToSpline(state: *BaseState) void {
     //const pos: [2]f64 = window.getCursorPos();
     //const int_pos: [2]u16 = .{ @intFromFloat(pos[0]), @intFromFloat(pos[1]) };
     //std.debug.print("({}, {})", .{ int_pos[0], int_pos[1] });
-    points[point_count] = compCursorPos(state.window, .{ state.width, state.height });
+    points[point_count] = compCursorPos(state.window, Vector2I.init(state.width, state.height));
     point_count += 1;
     if (point_count == 4) {
         //std.debug.print("Got 4 points!", .{});
@@ -63,8 +68,8 @@ fn addPointToSpline(state: *BaseState) void {
 fn drawSpline(state: *BaseState) void {
     const ps = points[0..point_count];
     for (ps) |p| {
-        const val: u32 = p[0] * @as(u32, @intCast(state.height)) + p[1]; //p[0] * @as(u32, @intCast(state.height)) + p[1];
-        state.image[val] = .{ .red = 255, .green = 0, .blue = 0, .a = 0 };
+        const val = p.y * state.width + p.x; //p[0] * @as(u32, @intCast(state.height)) + p[1];
+        state.image[@intCast(val)] = .{ .red = 255, .green = 0, .blue = 0, .a = 0 };
     }
 
     if (point_count == 4) {
@@ -93,7 +98,7 @@ const BaseState = struct {
     mouse_pressed: bool,
 
     image: [512 * 288]Color,
-    pos: @Vector(2, u16),
+    pos: Vector2I,
 };
 
 const Color = struct {
@@ -188,7 +193,7 @@ pub fn init(allc: std.mem.Allocator, window: *glfw.Window) !BaseState {
         .{
             .position = [3]f32{ -1.0, -1.0, 0.0 },
             .color = [3]f32{ 0.0, 1.0, 0.0 },
-            .uv = [2]f32{ 1.0, 0.0 },
+            .uv = [2]f32{ 0.0, 1.0 },
         },
         .{
             .position = [3]f32{ 1.0, -1.0, 0.0 },
@@ -198,7 +203,7 @@ pub fn init(allc: std.mem.Allocator, window: *glfw.Window) !BaseState {
         .{
             .position = [3]f32{ 1.0, 1.0, 0.0 },
             .color = [3]f32{ 0.0, 0.0, 1.0 },
-            .uv = [2]f32{ 0.0, 1.0 },
+            .uv = [2]f32{ 1.0, 0.0 },
         },
     };
     gfx_cntx.queue.writeBuffer(gfx_cntx.lookupResource(vertex_buffer).?, 0, Vertex, vertex_data[0..]);
@@ -233,7 +238,9 @@ pub fn init(allc: std.mem.Allocator, window: *glfw.Window) !BaseState {
         ),
         .mip_level_count = 1,
     });
-    const texture_view = gfx_cntx.createTextureView(texture, .{});
+    const texture_view = gfx_cntx.createTextureView(texture, .{
+        .format = .rgba8_unorm,
+    });
 
     gfx_cntx.queue.writeTexture(
         .{ .texture = gfx_cntx.lookupResource(texture).? },
@@ -273,7 +280,7 @@ pub fn init(allc: std.mem.Allocator, window: *glfw.Window) !BaseState {
         .window = undefined,
         .mouse_pressed = false,
         .image = image,
-        .pos = .{ 0, 0 },
+        .pos = .zero,
     };
 }
 
@@ -285,13 +292,17 @@ fn deinit(allc: std.mem.Allocator, state: *BaseState) void {
 fn update(state: *BaseState) void {
     processInput(state);
 
-    state.image[state.pos[1] * state.height + state.pos[0]] = .{ .red = 0, .green = 0, .blue = 0, .a = 0 };
-    state.pos += .{ 1, 0 };
-    if (state.pos[0] == 256)
-        state.pos[0] = 0;
-    state.image[state.pos[1] * state.height + state.pos[0]] = .{ .red = 0, .green = 0, .blue = 255, .a = 0 };
-    //@memset(&state.image, .{ .red = 0, .green = 0, .blue = 0, .a = 0 });
-    //drawSpline(state);
+    @memset(&state.image, .{ .red = 0, .green = 0, .blue = 0, .a = 0 });
+    state.pos.x += 1;
+    if (state.pos.x == state.width)
+        state.pos.x = 0;
+    state.image[@intCast(state.pos.y * state.width + state.pos.x)] = .{
+        .red = 0,
+        .green = 0,
+        .blue = 255,
+        .a = 0,
+    };
+    drawSpline(state);
 }
 
 fn processInput(state: *BaseState) void {
