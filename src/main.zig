@@ -6,6 +6,7 @@ const math = @import("zmath");
 const spline = @import("zspline");
 const Vector2I = spline.Vector2I;
 const Vector2B = spline.Vector2B;
+const Vector2 = spline.Vector2;
 
 /// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
 const lib = @import("Zig_Game_lib");
@@ -97,7 +98,7 @@ const BaseState = struct {
 
     mouse_pressed: bool,
 
-    image: [512 * 288]Color,
+    image: [256 * 144]Color,
     pos: Vector2I,
 };
 
@@ -219,9 +220,14 @@ pub fn init(allc: std.mem.Allocator, window: *glfw.Window) !BaseState {
     };
     gfx_cntx.queue.writeBuffer(gfx_cntx.lookupResource(index_buffer).?, 0, u32, index_data[0..]);
 
-    const width = 512;
-    const height = 288;
-    const image: [width * height]Color = [1]Color{.{ .red = 0, .green = 0, .blue = 0, .a = 0 }} ** (width * height);
+    const width = 256;
+    const height = 144;
+    const image: [width * height]Color = [1]Color{.{
+        .red = 0,
+        .green = 0,
+        .blue = 0,
+        .a = 0,
+    }} ** (width * height);
 
     //create texture
     const texture = gfx_cntx.createTexture(.{
@@ -320,6 +326,26 @@ fn draw(state: *BaseState) void {
     const back_buffer_view = gfx_cntx.swapchain.getCurrentTextureView();
     defer back_buffer_view.release();
 
+    const _window_size = state.window.getSize();
+    const window_size: Vector2 = .init(@floatFromInt(_window_size[0]), @floatFromInt(_window_size[1]));
+    const ratio = 9.0 / 16.0;
+    //should flip to prioritizing the y, more normal that way around
+    var canvas_size: Vector2 = .init(window_size.x, ratio * window_size.x);
+    //y too big if keep the x
+    if (canvas_size.y > window_size.y) {
+        canvas_size.x = window_size.y / ratio;
+        canvas_size.y = window_size.y;
+    }
+
+    const scale = canvas_size.div(window_size);
+
+    const view: math.Mat = .{
+        .{ scale.x, 0, 0, 0 },
+        .{ 0, scale.y, 0, 0 },
+        .{ 0, 0, 1, 0 },
+        .{ 0, 0, 0, 1 },
+    };
+
     const commands = commands: {
         const encoder = gfx_cntx.device.createCommandEncoder(null);
         defer encoder.release();
@@ -360,7 +386,10 @@ fn draw(state: *BaseState) void {
 
             // Draw
             {
-                pass.setBindGroup(0, bind_group, &.{0});
+                const mem = gfx_cntx.uniformsAllocate(math.Mat, 1);
+                mem.slice[0] = math.transpose(view);
+
+                pass.setBindGroup(0, bind_group, &.{mem.offset});
                 pass.drawIndexed(6, 2, 0, 0, 0);
             }
         }
@@ -387,5 +416,6 @@ fn draw(state: *BaseState) void {
 
     gfx_cntx.submit(&.{commands});
 
+    //swaps frame buffers
     if (gfx_cntx.present() == .swap_chain_resized) {}
 }
