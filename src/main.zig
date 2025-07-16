@@ -31,6 +31,8 @@ pub fn main() !void {
     state.gfx.height = 144;
     state.gfx.width = 256;
 
+    state.game.pos = .zero;
+
     state.render = try .init(allc, window);
     defer state.render.deinit(allc);
 
@@ -64,12 +66,13 @@ fn addPointToSpline(state: *State) void {
     //const pos: [2]f64 = window.getCursorPos();
     //const int_pos: [2]u16 = .{ @intFromFloat(pos[0]), @intFromFloat(pos[1]) };
     //std.debug.print("({}, {})", .{ int_pos[0], int_pos[1] });
-    points[point_count] = compCursorPos(state.render.window, Vector2I.init(state.gfx.width, state.gfx.height));
-    point_count += 1;
     if (point_count == 4) {
         //std.debug.print("Got 4 points!", .{});
         point_count = 0;
+        return;
     }
+    points[point_count] = compCursorPos(state.render.window, Vector2I.init(state.gfx.width, state.gfx.height));
+    point_count += 1;
 }
 
 fn drawSpline(state: *State, out_buffer: []Vector2I) ?[]Vector2I {
@@ -80,8 +83,14 @@ fn drawSpline(state: *State, out_buffer: []Vector2I) ?[]Vector2I {
     }
 
     if (point_count == 4) {
-        std.debug.print("draw spline", .{});
-        var c: spline.CubicSpline = .{
+        //std.debug.print("draw spline", .{});
+        //var c: spline.CubicSpline = .{
+        //    .p0 = points[0],
+        //    .p1 = points[1],
+        //    .p2 = points[2],
+        //    .p3 = points[3],
+        //};
+        const c: spline.CubicSpline = .{
             .p0 = points[0],
             .p1 = points[1],
             .p2 = points[2],
@@ -303,7 +312,7 @@ const ScreenState = struct {
 const GameState = struct {
     mouse_pressed: bool,
     pos: Vector2I,
-    point_buffer: [512]Vector2I,
+    point_buffer: [1024]Vector2I,
 };
 
 const State = struct {
@@ -328,6 +337,20 @@ const Color = struct {
     a: u8,
 };
 
+const getIndexErr = error{
+    outOfRange,
+};
+
+fn getIndex(pos: Vector2I, size: Vector2I) !u32 {
+    if (pos.x < 0 or pos.y < 0)
+        return getIndexErr.outOfRange;
+    if (pos.x >= size.x or pos.y >= size.y)
+        return getIndexErr.outOfRange;
+    return @as(u32, @intCast(pos.y)) *
+        @as(u32, @intCast(size.x)) +
+        @as(u32, @intCast(pos.x));
+}
+
 fn update(state: *State) void {
     processInput(state);
 
@@ -335,16 +358,96 @@ fn update(state: *State) void {
     state.game.pos.x += 1;
     if (state.game.pos.x == state.gfx.width)
         state.game.pos.x = 0;
-    state.gfx.image[@intCast(state.game.pos.y * state.gfx.width + state.game.pos.x)] = .{
+    const size: Vector2I = .{ .x = state.gfx.width, .y = state.gfx.height };
+    const index: u32 = getIndex(state.game.pos, size) catch {
+        std.debug.print("oof ({}, {}) \n", .{ state.game.pos.x, state.game.pos.y });
+        return;
+    };
+    state.gfx.image[@intCast(index)] = .{
         .red = 0,
         .green = 0,
         .blue = 255,
         .a = 0,
     };
-    const ps = drawSpline(state, state.game.point_buffer[0..]) orelse return;
+    const limit = 1024;
+    const ps = drawSpline(state, state.game.point_buffer[0..limit]) orelse return;
     const color: Color = .{ .red = 0, .green = 0, .blue = 255, .a = 0 };
     for (ps) |p| {
+        if (p.x < 0 or p.y < 0)
+            continue;
+        if (p.x >= state.gfx.width or p.y >= state.gfx.height)
+            continue;
         state.gfx.image[@intCast(p.y * state.gfx.width + p.x)] = color;
+    }
+
+    if (point_count == 4) {
+        const c: spline.CubicSpline = .{
+            .p0 = points[0],
+            .p1 = points[1],
+            .p2 = points[2],
+            .p3 = points[3],
+        };
+        const green: Color = .{ .red = 0, .green = 255, .blue = 255, .a = 0 };
+        var buffer = [1]spline.CubicSpline{.{
+            .p0 = .zero,
+            .p1 = .zero,
+            .p2 = .zero,
+            .p3 = .zero,
+        }} ** 5;
+        var splines: []spline.CubicSpline = buffer[0..];
+        splines = c.cutToMontone(splines);
+        var count: usize = ps.len;
+        for (splines) |s| {
+            state.game.point_buffer[count] = s.p0;
+            count += 1;
+            state.game.point_buffer[count] = s.p1;
+            count += 1;
+            state.game.point_buffer[count] = s.p2;
+            count += 1;
+            state.game.point_buffer[count] = s.p3;
+            count += 1;
+            //count += (spline.Line{ .p = s.p0, .q = s.p1 }).draw(state.game.point_buffer[count..]).len;
+            //count += (spline.Line{ .p = s.p1, .q = s.p2 }).draw(state.game.point_buffer[count..]).len;
+            //count += (spline.Line{ .p = s.p2, .q = s.p3 }).draw(state.game.point_buffer[count..]).len;
+        }
+        count += splines[0].draw(state.game.point_buffer[count..]).len;
+        if (!splines[0].p3.eql(state.game.point_buffer[count - 1])) {
+            std.debug.print("wtf, len: {}", .{count});
+        }
+        if (!splines[1].p0.eql(splines[0].p3)) {
+            std.debug.print("wtf, len: {}", .{count});
+        }
+
+        const point = splines[0].p3;
+        state.gfx.image[@intCast(point.y * state.gfx.width + point.x)] = green;
+
+        //const c: spline.QuadSpline = .{
+        //    .p0 = points[0],
+        //    .p1 = points[1],
+        //    .p2 = points[2],
+        //};
+        //var buffer = [1]spline.QuadSpline{.{
+        //    .p0 = .zero,
+        //    .p1 = .zero,
+        //    .p2 = .zero,
+        //}} ** 3;
+        //var splines: []spline.QuadSpline = buffer[0..];
+
+        //splines = c.cutToMonotone(splines);
+        //var count: usize = ps.len;
+        //for (splines) |s| {
+        //    count += (spline.Line{ .p = s.p0, .q = s.p1 }).draw(state.game.point_buffer[count..]).len;
+        //    count += (spline.Line{ .p = s.p1, .q = s.p2 }).draw(state.game.point_buffer[count..]).len;
+        //}
+
+        //std.debug.print("drawing lines, noSplines: {}", .{splines.len});
+        for (state.game.point_buffer[ps.len..count]) |p| {
+            if (p.x < 0 or p.y < 0)
+                continue;
+            if (p.x >= state.gfx.width or p.y >= state.gfx.height)
+                continue;
+            //state.gfx.image[@intCast(p.y * state.gfx.width + p.x)] = green;
+        }
     }
 }
 
