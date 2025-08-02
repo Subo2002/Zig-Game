@@ -75,6 +75,29 @@ fn addPointToSpline(state: *State) void {
     point_count += 1;
 }
 
+fn testQuadSpline(state: *State) void {
+    const c: spline.QuadSpline = .{
+        .p0 = .{ .x = 66, .y = 48 },
+        .p1 = .{ .x = 150, .y = 51 },
+        .p2 = .{ .x = 122, .y = 77 },
+    };
+    var buffer: [1024]Vector2I = std.mem.zeroes([1024]Vector2I);
+    const _points = c.draw(buffer[0..]);
+    const color: Color = .{
+        .red = 255,
+        .green = 255,
+        .blue = 0,
+        .a = 0,
+    };
+    for (_points) |p| {
+        if (p.x < 0 or p.y < 0)
+            continue;
+        if (p.x >= state.gfx.width or p.y >= state.gfx.height)
+            continue;
+        state.gfx.image[@intCast(p.y * state.gfx.width + p.x)] = color;
+    }
+}
+
 fn drawSpline(state: *State, out_buffer: []Vector2I) ?[]Vector2I {
     const ps = points[0..point_count];
     for (ps) |p| {
@@ -379,76 +402,7 @@ fn update(state: *State) void {
             continue;
         state.gfx.image[@intCast(p.y * state.gfx.width + p.x)] = color;
     }
-
-    if (point_count == 4) {
-        const c: spline.CubicSpline = .{
-            .p0 = points[0],
-            .p1 = points[1],
-            .p2 = points[2],
-            .p3 = points[3],
-        };
-        const green: Color = .{ .red = 0, .green = 255, .blue = 255, .a = 0 };
-        var buffer = [1]spline.CubicSpline{.{
-            .p0 = .zero,
-            .p1 = .zero,
-            .p2 = .zero,
-            .p3 = .zero,
-        }} ** 5;
-        var splines: []spline.CubicSpline = buffer[0..];
-        splines = c.cutToMontone(splines);
-        var count: usize = ps.len;
-        for (splines) |s| {
-            state.game.point_buffer[count] = s.p0;
-            count += 1;
-            state.game.point_buffer[count] = s.p1;
-            count += 1;
-            state.game.point_buffer[count] = s.p2;
-            count += 1;
-            state.game.point_buffer[count] = s.p3;
-            count += 1;
-            //count += (spline.Line{ .p = s.p0, .q = s.p1 }).draw(state.game.point_buffer[count..]).len;
-            //count += (spline.Line{ .p = s.p1, .q = s.p2 }).draw(state.game.point_buffer[count..]).len;
-            //count += (spline.Line{ .p = s.p2, .q = s.p3 }).draw(state.game.point_buffer[count..]).len;
-        }
-        count += splines[0].draw(state.game.point_buffer[count..]).len;
-        if (!splines[0].p3.eql(state.game.point_buffer[count - 1])) {
-            std.debug.print("wtf, len: {}", .{count});
-        }
-        if (!splines[1].p0.eql(splines[0].p3)) {
-            std.debug.print("wtf, len: {}", .{count});
-        }
-
-        const point = splines[0].p3;
-        state.gfx.image[@intCast(point.y * state.gfx.width + point.x)] = green;
-
-        //const c: spline.QuadSpline = .{
-        //    .p0 = points[0],
-        //    .p1 = points[1],
-        //    .p2 = points[2],
-        //};
-        //var buffer = [1]spline.QuadSpline{.{
-        //    .p0 = .zero,
-        //    .p1 = .zero,
-        //    .p2 = .zero,
-        //}} ** 3;
-        //var splines: []spline.QuadSpline = buffer[0..];
-
-        //splines = c.cutToMonotone(splines);
-        //var count: usize = ps.len;
-        //for (splines) |s| {
-        //    count += (spline.Line{ .p = s.p0, .q = s.p1 }).draw(state.game.point_buffer[count..]).len;
-        //    count += (spline.Line{ .p = s.p1, .q = s.p2 }).draw(state.game.point_buffer[count..]).len;
-        //}
-
-        //std.debug.print("drawing lines, noSplines: {}", .{splines.len});
-        for (state.game.point_buffer[ps.len..count]) |p| {
-            if (p.x < 0 or p.y < 0)
-                continue;
-            if (p.x >= state.gfx.width or p.y >= state.gfx.height)
-                continue;
-            //state.gfx.image[@intCast(p.y * state.gfx.width + p.x)] = green;
-        }
-    }
+    //testQuadSpline(state);
 }
 
 fn processInput(state: *State) void {
