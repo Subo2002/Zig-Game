@@ -74,8 +74,8 @@
             .lazy = true,
         },
         .ZSpline = .{
-            .url = "git+https://github.com/Subo2002/ZSpline.git#ada4a469ef368e27a5454fe305ac0daaba6db6f0",
-            .hash = "ZSpline-0.0.0-kRSV_JppAACfPJHEgvqIPm2uhUES6G06tNuXz8UZvPa0",
+            .url = "git+https://github.com/Subo2002/ZSpline.git#bc32fa94cc2a1f14a170bcd00d0a5ce15617191e",
+            .hash = "ZSpline-0.0.0-kRSV_CdoAACwIxtWJyhr-z8I9abrVv9lKoErIamiVnfX",
         },
     },
     .paths = .{
