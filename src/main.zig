@@ -7,6 +7,7 @@ const spline = @import("zspline");
 const Vector2I = spline.Vector2I;
 const Vector2B = spline.Vector2B;
 const Vector2 = spline.Vector2;
+const Circle = spline.Circle;
 
 /// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
 const lib = @import("Zig_Game_lib");
@@ -95,6 +96,28 @@ fn testQuadSpline(state: *State) void {
         if (p.x >= state.gfx.width or p.y >= state.gfx.height)
             continue;
         state.gfx.image[@intCast(p.y * state.gfx.width + p.x)] = color;
+    }
+}
+
+//fn drawBolt(state: *State) void {
+//    const size: Vector2I = .{ .x = state.gfx.height, .y = state.gfx.width };
+//    const midPoint: Vector2I = .{ .x = size.x / 2, .y = size.y / 2 };
+//
+//}
+
+fn drawCircle(state: *State) void {
+    const size: Vector2I = .{ .x = state.gfx.width, .y = state.gfx.height };
+    const midPoint: Vector2I = .{ .x = @divTrunc(size.x, 2), .y = @divTrunc(size.y, 2) };
+    const circle: Circle = .init(midPoint, 30);
+    var buffer: [1024]Vector2I = std.mem.zeroes([1024]Vector2I);
+    const ps = circle.draw(buffer[0..]);
+    for (ps) |p| {
+        if (p.x < 0 or p.y < 0)
+            continue;
+        if (p.x >= state.gfx.width or p.y >= state.gfx.height)
+            continue;
+        const val = p.y * state.gfx.width + p.x; //p[0] * @as(u32, @intCast(state.height)) + p[1];
+        state.gfx.image[@intCast(val)] = .{ .red = 0, .green = 255, .blue = 0, .a = 0 };
     }
 }
 
@@ -403,6 +426,7 @@ fn update(state: *State) void {
         state.gfx.image[@intCast(p.y * state.gfx.width + p.x)] = color;
     }
     //testQuadSpline(state);
+    drawCircle(state);
 }
 
 fn processInput(state: *State) void {
