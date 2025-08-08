@@ -8,6 +8,8 @@ const Vector2I = spline.Vector2I;
 const Vector2B = spline.Vector2B;
 const Vector2 = spline.Vector2;
 const Circle = spline.Circle;
+const CubicSpline = spline.CubicSpline;
+const Line = spline.Line;
 
 /// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
 const lib = @import("Zig_Game_lib");
@@ -33,6 +35,14 @@ pub fn main() !void {
     state.gfx.width = 256;
 
     state.game.pos = .zero;
+
+    const bolt = &state.game.bolt;
+    const size: Vector2I = .{ .x = state.gfx.width, .y = state.gfx.height };
+    const center: Vector2I = .{ .x = @divTrunc(size.x, 2), .y = @divTrunc(size.y, 2) };
+    bolt.head_pos = center.toFloat();
+    bolt.head_dirc = .{ .x = 30, .y = 0 };
+    bolt.tail_pos = center.toFloat().sub(.{ .x = 30, .y = 0 });
+    bolt.tail_dirc = .{ .x = 18, .y = 0 };
 
     state.render = try .init(allc, window);
     defer state.render.deinit(allc);
@@ -99,11 +109,54 @@ fn testQuadSpline(state: *State) void {
     }
 }
 
-//fn drawBolt(state: *State) void {
-//    const size: Vector2I = .{ .x = state.gfx.height, .y = state.gfx.width };
-//    const midPoint: Vector2I = .{ .x = size.x / 2, .y = size.y / 2 };
-//
-//}
+const Bolt = struct {
+    head_pos: Vector2,
+    head_dirc: Vector2,
+    tail_pos: Vector2,
+    tail_dirc: Vector2,
+};
+
+fn drawBolt(state: *State) void {
+    var buffer: [1024]Vector2I = std.mem.zeroes([1024]Vector2I);
+    const green: Color = .{ .red = 0, .green = 255, .blue = 255, .a = 0 };
+    const bolt = &state.game.bolt;
+    const head_radius = 5;
+
+    //draw head
+    const circle: Circle = .init(bolt.head_pos.round(), head_radius);
+    const ps = circle.draw(buffer[0..]);
+    drawPoints(state, ps, green);
+    const speed = std.math.sqrt(bolt.head_dirc.x * bolt.head_dirc.x + bolt.head_dirc.y * bolt.head_dirc.y);
+    const normal_to_dirc = Vector2.init(bolt.head_dirc.y, -bolt.head_dirc.x).scale(head_radius / speed);
+
+    //draw tail 1
+    const tail_1: CubicSpline = .{
+        .p0 = bolt.head_pos.add(normal_to_dirc).round(),
+        .p1 = bolt.head_pos.add(normal_to_dirc).add(bolt.head_dirc.scale(-3)).round(),
+        .p2 = bolt.tail_pos.sub(bolt.tail_dirc).round(),
+        .p3 = bolt.tail_pos.round(),
+    };
+    const ps_tail_1 = tail_1.draw(buffer[ps.len..]);
+    drawPoints(state, ps_tail_1, green);
+
+    //draw tail 2
+    const tail_2: CubicSpline = .{
+        .p0 = bolt.head_pos.add(normal_to_dirc.scale(-1)).round(),
+        .p1 = bolt.head_pos.add(normal_to_dirc.scale(-1)).add(bolt.head_dirc.scale(-3)).round(),
+        .p2 = bolt.tail_pos.sub(bolt.tail_dirc).round(),
+        .p3 = bolt.tail_pos.round(),
+    };
+    const ps_tail_2 = tail_2.draw(buffer[(ps.len + ps_tail_1.len)..]);
+    drawPoints(state, ps_tail_2, green);
+
+    //draw dirc
+    const dirc: Line = .{
+        .p = bolt.head_pos.round(),
+        .q = bolt.head_pos.add(bolt.head_dirc).round(),
+    };
+    const ps_dirc = dirc.draw(buffer[(ps.len + ps_tail_1.len + ps_tail_2.len)..]);
+    drawPoints(state, ps_dirc, .{ .red = 255, .green = 0, .blue = 0, .a = 0 });
+}
 
 fn drawCircle(state: *State) void {
     const size: Vector2I = .{ .x = state.gfx.width, .y = state.gfx.height };
@@ -111,13 +164,17 @@ fn drawCircle(state: *State) void {
     const circle: Circle = .init(midPoint, 30);
     var buffer: [1024]Vector2I = std.mem.zeroes([1024]Vector2I);
     const ps = circle.draw(buffer[0..]);
+    drawPoints(state, ps, .{ .red = 0, .green = 255, .blue = 0, .a = 0 });
+}
+
+fn drawPoints(state: *State, ps: []Vector2I, color: Color) void {
     for (ps) |p| {
         if (p.x < 0 or p.y < 0)
             continue;
         if (p.x >= state.gfx.width or p.y >= state.gfx.height)
             continue;
         const val = p.y * state.gfx.width + p.x; //p[0] * @as(u32, @intCast(state.height)) + p[1];
-        state.gfx.image[@intCast(val)] = .{ .red = 0, .green = 255, .blue = 0, .a = 0 };
+        state.gfx.image[@intCast(val)] = color;
     }
 }
 
@@ -359,6 +416,10 @@ const GameState = struct {
     mouse_pressed: bool,
     pos: Vector2I,
     point_buffer: [1024]Vector2I,
+    bolt: Bolt,
+    last_time: f64,
+    dt: f32,
+    dt_phys: f32,
 };
 
 const State = struct {
@@ -397,10 +458,92 @@ fn getIndex(pos: Vector2I, size: Vector2I) !u32 {
         @as(u32, @intCast(pos.x));
 }
 
+fn physics_update(state: *State) void {
+    //bolt update
+    const old_head_pos = state.game.bolt.head_pos;
+    updateHead(state);
+    updateTail(state, old_head_pos);
+}
+
+fn updateHead(state: *State) void {
+    const bolt = &state.game.bolt;
+    const size: Vector2I = .{ .x = state.gfx.width, .y = state.gfx.height };
+    const mouse_pos = compCursorPos(state.render.window, size).toFloat();
+
+    const turning_dirc = mouse_pos.sub(bolt.head_pos);
+    var turning_angle: f64 = std.math.atan(turning_dirc.y / turning_dirc.x);
+    if (turning_dirc.x < 0)
+        turning_angle += (if (turning_dirc.y >= 0) std.math.pi else -std.math.pi);
+
+    var current_angle: f64 = std.math.atan(bolt.head_dirc.y / bolt.head_dirc.x);
+    if (bolt.head_dirc.x < 0)
+        current_angle += (if (bolt.head_dirc.y >= 0) std.math.pi else -std.math.pi);
+
+    var diff_angle = turning_angle - current_angle;
+    if (diff_angle >= std.math.pi) {
+        diff_angle -= 2 * std.math.pi;
+    } else if (diff_angle < -std.math.pi) {
+        diff_angle += 2 * std.math.pi;
+    }
+    const smallness = 0.1 * 2 * std.math.pi;
+    const turning_anticlockwise: f64 =
+        if (smallness >= (if (diff_angle < 0) -diff_angle else diff_angle)) 0.0 else if (diff_angle >= 0) 1.0 else -1.0;
+
+    const turning_rate = 0.1; //between 0 and 1, how much it can rotate by
+    const turning_speed = turning_rate * 2 * std.math.pi;
+    const new_angle = current_angle + turning_anticlockwise * turning_speed * state.game.dt_phys;
+
+    const speed = std.math.sqrt(bolt.head_dirc.x * bolt.head_dirc.x + bolt.head_dirc.y * bolt.head_dirc.y);
+    bolt.head_dirc = .init(@floatCast(speed * std.math.cos(new_angle)), @floatCast(speed * std.math.sin(new_angle)));
+    bolt.head_pos = bolt.head_pos.add(bolt.head_dirc.scale(state.game.dt_phys));
+}
+
+fn updateTail(state: *State, towards: Vector2) void {
+    const bolt = &state.game.bolt;
+    const turning_dirc = towards.sub(bolt.tail_pos);
+    var turning_angle: f64 = std.math.atan(turning_dirc.y / turning_dirc.x);
+    if (turning_dirc.x < 0)
+        turning_angle += (if (turning_dirc.y >= 0) std.math.pi else -std.math.pi);
+
+    var current_angle: f64 = std.math.atan(bolt.tail_dirc.y / bolt.tail_dirc.x);
+    if (bolt.tail_dirc.x < 0)
+        current_angle += (if (bolt.tail_dirc.y >= 0) std.math.pi else -std.math.pi);
+
+    var diff_angle = turning_angle - current_angle;
+    if (diff_angle >= std.math.pi) {
+        diff_angle -= 2 * std.math.pi;
+    } else if (diff_angle < -std.math.pi) {
+        diff_angle += 2 * std.math.pi;
+    }
+    const smallness = 0.1 * 2 * std.math.pi;
+    const turning_anticlockwise: f64 =
+        if (smallness >= (if (diff_angle < 0) -diff_angle else diff_angle)) 0.0 else if (diff_angle >= 0) 1.0 else -1.0;
+
+    const turning_rate = 0.1; //between 0 and 1, how much it can rotate by
+    const turning_speed = turning_rate * 2 * std.math.pi;
+    const new_angle = current_angle + turning_anticlockwise * turning_speed * state.game.dt_phys;
+    const speed = std.math.sqrt(bolt.tail_dirc.x * bolt.tail_dirc.x + bolt.tail_dirc.y * bolt.tail_dirc.y);
+    bolt.tail_dirc = .init(@floatCast(speed * std.math.cos(new_angle)), @floatCast(speed * std.math.sin(new_angle)));
+    bolt.tail_pos = bolt.tail_pos.add(bolt.tail_dirc.scale(state.game.dt_phys));
+}
+
 fn update(state: *State) void {
+    //time
+    const new_time = glfw.getTime();
+    state.game.dt = @floatCast(new_time - state.game.last_time);
+    state.game.last_time = new_time;
+    state.game.dt_phys = state.game.dt; //+= state.game.dt;
+    //if (state.game.dt_phys >= 0.016666) {
+    physics_update(state);
+    //    state.game.dt_phys = 0;
+    //}
+    //input
     processInput(state);
 
+    //clear screen
     @memset(&state.gfx.image, .{ .red = 0, .green = 0, .blue = 0, .a = 0 });
+
+    //draw the little moving blue dot
     state.game.pos.x += 1;
     if (state.game.pos.x == state.gfx.width)
         state.game.pos.x = 0;
@@ -415,6 +558,11 @@ fn update(state: *State) void {
         .blue = 255,
         .a = 0,
     };
+
+    //bolt drawer
+    drawBolt(state);
+
+    //spline drawer
     const limit = 1024;
     const ps = drawSpline(state, state.game.point_buffer[0..limit]) orelse return;
     const color: Color = .{ .red = 0, .green = 0, .blue = 255, .a = 0 };
@@ -426,7 +574,7 @@ fn update(state: *State) void {
         state.gfx.image[@intCast(p.y * state.gfx.width + p.x)] = color;
     }
     //testQuadSpline(state);
-    drawCircle(state);
+    //drawCircle(state);
 }
 
 fn processInput(state: *State) void {
