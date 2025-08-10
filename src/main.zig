@@ -40,9 +40,11 @@ pub fn main() !void {
     const size: Vector2I = .{ .x = state.gfx.width, .y = state.gfx.height };
     const center: Vector2I = .{ .x = @divTrunc(size.x, 2), .y = @divTrunc(size.y, 2) };
     bolt.head_pos = center.toFloat();
-    bolt.head_dirc = .{ .x = 30, .y = 0 };
+    bolt.head_dirc = 0;
+    bolt.head_speed = 30;
     bolt.tail_pos = center.toFloat().sub(.{ .x = 30, .y = 0 });
-    bolt.tail_dirc = .{ .x = 18, .y = 0 };
+    bolt.tail_speed = 18;
+    bolt.tail_dirc = 0;
 
     state.render = try .init(allc, window);
     defer state.render.deinit(allc);
@@ -111,9 +113,11 @@ fn testQuadSpline(state: *State) void {
 
 const Bolt = struct {
     head_pos: Vector2,
-    head_dirc: Vector2,
+    head_dirc: f32,
+    head_speed: f32,
     tail_pos: Vector2,
-    tail_dirc: Vector2,
+    tail_dirc: f32,
+    tail_speed: f32,
 };
 
 fn drawBolt(state: *State) void {
@@ -126,24 +130,37 @@ fn drawBolt(state: *State) void {
     const circle: Circle = .init(bolt.head_pos.round(), head_radius);
     const ps = circle.draw(buffer[0..]);
     drawPoints(state, ps, green);
-    const speed = std.math.sqrt(bolt.head_dirc.x * bolt.head_dirc.x + bolt.head_dirc.y * bolt.head_dirc.y);
-    const normal_to_dirc = Vector2.init(bolt.head_dirc.y, -bolt.head_dirc.x).scale(head_radius / speed);
+    const head_dirc = Vector2.init(std.math.cos(bolt.head_dirc), std.math.sin(bolt.head_dirc));
+    const tail_dirc = Vector2.init(std.math.cos(bolt.tail_dirc), std.math.sin(bolt.tail_dirc));
+    const normal_to_dirc = Vector2.init(head_dirc.y, -head_dirc.x).scale(head_radius);
 
     //draw tail 1
+    const p0 = bolt.head_pos.add(normal_to_dirc);
+    const p2 = bolt.tail_pos.sub(tail_dirc.scale(1));
+    const q = p2.sub(p0);
+    const det = head_dirc.x * q.y - q.x * head_dirc.y;
+    const m = if (det > 0) std.math.sqrt((2 * det) / (3 * head_radius)) else 1;
+
     const tail_1: CubicSpline = .{
-        .p0 = bolt.head_pos.add(normal_to_dirc).round(),
-        .p1 = bolt.head_pos.add(normal_to_dirc).add(bolt.head_dirc.scale(-3)).round(),
-        .p2 = bolt.tail_pos.sub(bolt.tail_dirc).round(),
+        .p0 = p0.round(),
+        .p1 = bolt.head_pos.add(normal_to_dirc).add(head_dirc.scale(m)).round(),
+        .p2 = p2.round(),
         .p3 = bolt.tail_pos.round(),
     };
     const ps_tail_1 = tail_1.draw(buffer[ps.len..]);
     drawPoints(state, ps_tail_1, green);
 
     //draw tail 2
+    const p0_ = bolt.head_pos.add(normal_to_dirc.scale(-1));
+    const p2_ = bolt.tail_pos.sub(tail_dirc.scale(1));
+    const q_ = p2_.sub(p0_);
+    const det_ = head_dirc.x * q_.y - q_.x * head_dirc.y;
+    const m_ = if (det_ > 0) std.math.sqrt((2 * det_) / (3 * head_radius)) else 1;
+    std.debug.print("{}\n", .{m});
     const tail_2: CubicSpline = .{
-        .p0 = bolt.head_pos.add(normal_to_dirc.scale(-1)).round(),
-        .p1 = bolt.head_pos.add(normal_to_dirc.scale(-1)).add(bolt.head_dirc.scale(-3)).round(),
-        .p2 = bolt.tail_pos.sub(bolt.tail_dirc).round(),
+        .p0 = p0_.round(),
+        .p1 = bolt.head_pos.add(normal_to_dirc.scale(-1)).add(head_dirc.scale(m_)).round(),
+        .p2 = p2_.round(),
         .p3 = bolt.tail_pos.round(),
     };
     const ps_tail_2 = tail_2.draw(buffer[(ps.len + ps_tail_1.len)..]);
@@ -152,7 +169,7 @@ fn drawBolt(state: *State) void {
     //draw dirc
     const dirc: Line = .{
         .p = bolt.head_pos.round(),
-        .q = bolt.head_pos.add(bolt.head_dirc).round(),
+        .q = bolt.head_pos.add(head_dirc).round(),
     };
     const ps_dirc = dirc.draw(buffer[(ps.len + ps_tail_1.len + ps_tail_2.len)..]);
     drawPoints(state, ps_dirc, .{ .red = 255, .green = 0, .blue = 0, .a = 0 });
@@ -475,9 +492,7 @@ fn updateHead(state: *State) void {
     if (turning_dirc.x < 0)
         turning_angle += (if (turning_dirc.y >= 0) std.math.pi else -std.math.pi);
 
-    var current_angle: f64 = std.math.atan(bolt.head_dirc.y / bolt.head_dirc.x);
-    if (bolt.head_dirc.x < 0)
-        current_angle += (if (bolt.head_dirc.y >= 0) std.math.pi else -std.math.pi);
+    const current_angle: f64 = bolt.head_dirc;
 
     var diff_angle = turning_angle - current_angle;
     if (diff_angle >= std.math.pi) {
@@ -493,9 +508,9 @@ fn updateHead(state: *State) void {
     const turning_speed = turning_rate * 2 * std.math.pi;
     const new_angle = current_angle + turning_anticlockwise * turning_speed * state.game.dt_phys;
 
-    const speed = std.math.sqrt(bolt.head_dirc.x * bolt.head_dirc.x + bolt.head_dirc.y * bolt.head_dirc.y);
-    bolt.head_dirc = .init(@floatCast(speed * std.math.cos(new_angle)), @floatCast(speed * std.math.sin(new_angle)));
-    bolt.head_pos = bolt.head_pos.add(bolt.head_dirc.scale(state.game.dt_phys));
+    bolt.head_dirc = @floatCast(new_angle);
+    const head_dirc_vec = Vector2.init(@floatCast(std.math.cos(new_angle)), @floatCast(std.math.sin(new_angle)));
+    bolt.head_pos = bolt.head_pos.add(head_dirc_vec.scale(bolt.head_speed * state.game.dt_phys));
 }
 
 fn updateTail(state: *State, towards: Vector2) void {
@@ -505,9 +520,7 @@ fn updateTail(state: *State, towards: Vector2) void {
     if (turning_dirc.x < 0)
         turning_angle += (if (turning_dirc.y >= 0) std.math.pi else -std.math.pi);
 
-    var current_angle: f64 = std.math.atan(bolt.tail_dirc.y / bolt.tail_dirc.x);
-    if (bolt.tail_dirc.x < 0)
-        current_angle += (if (bolt.tail_dirc.y >= 0) std.math.pi else -std.math.pi);
+    const current_angle: f64 = bolt.tail_dirc;
 
     var diff_angle = turning_angle - current_angle;
     if (diff_angle >= std.math.pi) {
@@ -522,9 +535,9 @@ fn updateTail(state: *State, towards: Vector2) void {
     const turning_rate = 0.1; //between 0 and 1, how much it can rotate by
     const turning_speed = turning_rate * 2 * std.math.pi;
     const new_angle = current_angle + turning_anticlockwise * turning_speed * state.game.dt_phys;
-    const speed = std.math.sqrt(bolt.tail_dirc.x * bolt.tail_dirc.x + bolt.tail_dirc.y * bolt.tail_dirc.y);
-    bolt.tail_dirc = .init(@floatCast(speed * std.math.cos(new_angle)), @floatCast(speed * std.math.sin(new_angle)));
-    bolt.tail_pos = bolt.tail_pos.add(bolt.tail_dirc.scale(state.game.dt_phys));
+    bolt.tail_dirc = @floatCast(new_angle);
+    const tail_dirc_vec = Vector2.init(@floatCast(std.math.cos(new_angle)), @floatCast(std.math.sin(new_angle)));
+    bolt.tail_pos = bolt.tail_pos.add(tail_dirc_vec.scale(bolt.tail_speed * state.game.dt_phys));
 }
 
 fn update(state: *State) void {
