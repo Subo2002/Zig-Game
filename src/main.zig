@@ -41,9 +41,9 @@ pub fn main() !void {
     const center: Vector2I = .{ .x = @divTrunc(size.x, 2), .y = @divTrunc(size.y, 2) };
     bolt.head_pos = center.toFloat();
     bolt.head_dirc = 0;
-    bolt.head_speed = 30;
+    bolt.head_speed = 120;
     bolt.tail_pos = center.toFloat().sub(.{ .x = 30, .y = 0 });
-    bolt.tail_speed = 18;
+    bolt.tail_speed = 72;
     bolt.tail_dirc = 0;
 
     state.render = try .init(allc, window);
@@ -156,7 +156,7 @@ fn drawBolt(state: *State) void {
     const q_ = p2_.sub(p0_);
     const det_ = head_dirc.x * q_.y - q_.x * head_dirc.y;
     const m_ = if (det_ > 0) std.math.sqrt(2 * det_ * head_radius / 3) else if (det_ < 0) std.math.sqrt(-2 * head_radius * det_ / 3) else 1;
-    std.debug.print("{}\n", .{m});
+
     const tail_2: CubicSpline = .{
         .p0 = p0_.round(),
         .p1 = bolt.head_pos.add(normal_to_dirc.scale(-1)).add(head_dirc.scale(-m_)).round(),
@@ -504,7 +504,7 @@ fn updateHead(state: *State) void {
     const turning_anticlockwise: f64 =
         if (smallness >= (if (diff_angle < 0) -diff_angle else diff_angle)) 0.0 else if (diff_angle >= 0) 1.0 else -1.0;
 
-    const turning_rate = 0.1; //between 0 and 1, how much it can rotate by
+    const turning_rate = 0.4; //between 0 and 1, how much it can rotate by
     const turning_speed = turning_rate * 2 * std.math.pi;
     const new_angle = current_angle + turning_anticlockwise * turning_speed * state.game.dt_phys;
 
@@ -532,7 +532,7 @@ fn updateTail(state: *State, towards: Vector2) void {
     const turning_anticlockwise: f64 =
         if (smallness >= (if (diff_angle < 0) -diff_angle else diff_angle)) 0.0 else if (diff_angle >= 0) 1.0 else -1.0;
 
-    const turning_rate = 0.1; //between 0 and 1, how much it can rotate by
+    const turning_rate = 0.4; //between 0 and 1, how much it can rotate by
     const turning_speed = turning_rate * 2 * std.math.pi;
     const new_angle = current_angle + turning_anticlockwise * turning_speed * state.game.dt_phys;
     bolt.tail_dirc = @floatCast(new_angle);
