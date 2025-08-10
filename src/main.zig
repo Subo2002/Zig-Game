@@ -139,11 +139,11 @@ fn drawBolt(state: *State) void {
     const p2 = bolt.tail_pos.sub(tail_dirc.scale(1));
     const q = p2.sub(p0);
     const det = head_dirc.x * q.y - q.x * head_dirc.y;
-    const m = if (det > 0) std.math.sqrt((2 * det) / (3 * head_radius)) else 1;
+    const m = if (det > 0) std.math.sqrt(2 * head_radius * det / 3) else if (det < 0) std.math.sqrt(-2 * head_radius * det / 3) else 1;
 
     const tail_1: CubicSpline = .{
         .p0 = p0.round(),
-        .p1 = bolt.head_pos.add(normal_to_dirc).add(head_dirc.scale(m)).round(),
+        .p1 = bolt.head_pos.add(normal_to_dirc).add(head_dirc.scale(-m)).round(),
         .p2 = p2.round(),
         .p3 = bolt.tail_pos.round(),
     };
@@ -155,11 +155,11 @@ fn drawBolt(state: *State) void {
     const p2_ = bolt.tail_pos.sub(tail_dirc.scale(1));
     const q_ = p2_.sub(p0_);
     const det_ = head_dirc.x * q_.y - q_.x * head_dirc.y;
-    const m_ = if (det_ > 0) std.math.sqrt((2 * det_) / (3 * head_radius)) else 1;
+    const m_ = if (det_ > 0) std.math.sqrt(2 * det_ * head_radius / 3) else if (det_ < 0) std.math.sqrt(-2 * head_radius * det_ / 3) else 1;
     std.debug.print("{}\n", .{m});
     const tail_2: CubicSpline = .{
         .p0 = p0_.round(),
-        .p1 = bolt.head_pos.add(normal_to_dirc.scale(-1)).add(head_dirc.scale(m_)).round(),
+        .p1 = bolt.head_pos.add(normal_to_dirc.scale(-1)).add(head_dirc.scale(-m_)).round(),
         .p2 = p2_.round(),
         .p3 = bolt.tail_pos.round(),
     };
