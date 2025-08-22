@@ -130,8 +130,8 @@ fn drawBolt(state: *State) void {
     const circle: Circle = .init(bolt.head_pos.round(), head_radius);
     const ps = circle.draw(buffer[0..]);
     drawPoints(state, ps, green);
-    const head_dirc = Vector2.init(std.math.cos(bolt.head_dirc), std.math.sin(bolt.head_dirc));
-    const tail_dirc = Vector2.init(std.math.cos(bolt.tail_dirc), std.math.sin(bolt.tail_dirc));
+    const head_dirc = Vector2.dircVec(bolt.head_dirc);
+    const tail_dirc = Vector2.dircVec(bolt.tail_dirc);
     const normal_to_dirc = Vector2.init(head_dirc.y, -head_dirc.x).scale(head_radius);
 
     //draw tail 1
@@ -488,9 +488,7 @@ fn updateHead(state: *State) void {
     const mouse_pos = compCursorPos(state.render.window, size).toFloat();
 
     const turning_dirc = mouse_pos.sub(bolt.head_pos);
-    var turning_angle: f64 = std.math.atan(turning_dirc.y / turning_dirc.x);
-    if (turning_dirc.x < 0)
-        turning_angle += (if (turning_dirc.y >= 0) std.math.pi else -std.math.pi);
+    const turning_angle = turning_dirc.compAngle();
 
     const current_angle: f64 = bolt.head_dirc;
 
@@ -500,11 +498,11 @@ fn updateHead(state: *State) void {
     } else if (diff_angle < -std.math.pi) {
         diff_angle += 2 * std.math.pi;
     }
-    const smallness = 0.1 * 2 * std.math.pi;
+    const smallness = 0.02 * 2 * std.math.pi;
     const turning_anticlockwise: f64 =
         if (smallness >= (if (diff_angle < 0) -diff_angle else diff_angle)) 0.0 else if (diff_angle >= 0) 1.0 else -1.0;
 
-    const turning_rate = 0.4; //between 0 and 1, how much it can rotate by
+    const turning_rate = 0.3; //between 0 and 1, how much it can rotate by
     const turning_speed = turning_rate * 2 * std.math.pi;
     const new_angle = current_angle + turning_anticlockwise * turning_speed * state.game.dt_phys;
 
@@ -516,9 +514,7 @@ fn updateHead(state: *State) void {
 fn updateTail(state: *State, towards: Vector2) void {
     const bolt = &state.game.bolt;
     const turning_dirc = towards.sub(bolt.tail_pos);
-    var turning_angle: f64 = std.math.atan(turning_dirc.y / turning_dirc.x);
-    if (turning_dirc.x < 0)
-        turning_angle += (if (turning_dirc.y >= 0) std.math.pi else -std.math.pi);
+    const turning_angle = turning_dirc.compAngle();
 
     const current_angle: f64 = bolt.tail_dirc;
 
@@ -528,7 +524,7 @@ fn updateTail(state: *State, towards: Vector2) void {
     } else if (diff_angle < -std.math.pi) {
         diff_angle += 2 * std.math.pi;
     }
-    const smallness = 0.1 * 2 * std.math.pi;
+    const smallness = 0.02 * 2 * std.math.pi;
     const turning_anticlockwise: f64 =
         if (smallness >= (if (diff_angle < 0) -diff_angle else diff_angle)) 0.0 else if (diff_angle >= 0) 1.0 else -1.0;
 
