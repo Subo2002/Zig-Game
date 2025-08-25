@@ -10,9 +10,12 @@ const Vector2 = spline.Vector2;
 const Circle = spline.Circle;
 const CubicSpline = spline.CubicSpline;
 const Line = spline.Line;
+const FloodFill = spline.FloodFill;
 
 /// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
 const lib = @import("Zig_Game_lib");
+
+const world_size = Vector2I.init(256, 144);
 
 pub fn main() !void {
     try glfw.init();
@@ -31,8 +34,8 @@ pub fn main() !void {
     var state: *State = try .init(allc);
     defer state.deinit(allc);
 
-    state.gfx.height = 144;
-    state.gfx.width = 256;
+    state.gfx.height = world_size.y;
+    state.gfx.width = world_size.x;
 
     state.game.pos = .zero;
 
@@ -41,13 +44,20 @@ pub fn main() !void {
     const center: Vector2I = .{ .x = @divTrunc(size.x, 2), .y = @divTrunc(size.y, 2) };
     bolt.head_pos = center.toFloat();
     bolt.head_dirc = 0;
-    bolt.head_speed = 120;
+    bolt.head_speed = 100;
     bolt.tail_pos = center.toFloat().sub(.{ .x = 30, .y = 0 });
-    bolt.tail_speed = 72;
+    bolt.tail_speed = 75;
     bolt.tail_dirc = 0;
 
     state.render = try .init(allc, window);
     defer state.render.deinit(allc);
+
+    var trans_buffer: [4096]u8 = undefined;
+    @memset(trans_buffer[0..], 0);
+    var backing_alloc = std.heap.FixedBufferAllocator.init(trans_buffer[0..]);
+    var trans_alloc = std.heap.ArenaAllocator.init(backing_alloc.allocator());
+    defer trans_alloc.deinit();
+    state.trans_alloc = trans_alloc.allocator();
 
     while (!window.shouldClose() and window.getKey(.escape) != .press) {
         glfw.pollEvents();
@@ -120,8 +130,20 @@ const Bolt = struct {
     tail_speed: f32,
 };
 
+const Logic = packed struct {
+    spell: bool,
+    leftovers: bool,
+};
+
+fn bufferToWorld(state: *State, buffer: []Vector2I, logic: Logic) void {
+    const world = state.game.logic_layer[0..];
+    for (buffer) |point| {
+        world[getIndex(point)] |= logic;
+    }
+}
+
 fn drawBolt(state: *State) void {
-    var buffer: [1024]Vector2I = std.mem.zeroes([1024]Vector2I);
+    var buffer: [2048]Vector2I = std.mem.zeroes([2048]Vector2I);
     const green: Color = .{ .red = 0, .green = 255, .blue = 255, .a = 0 };
     const bolt = &state.game.bolt;
     const head_radius = 5;
@@ -129,7 +151,8 @@ fn drawBolt(state: *State) void {
     //draw head
     const circle: Circle = .init(bolt.head_pos.round(), head_radius);
     const ps = circle.draw(buffer[0..]);
-    drawPoints(state, ps, green);
+
+    drawPoints(state, buffer[0..], green);
     const head_dirc = Vector2.dircVec(bolt.head_dirc);
     const tail_dirc = Vector2.dircVec(bolt.tail_dirc);
     const normal_to_dirc = Vector2.init(head_dirc.y, -head_dirc.x).scale(head_radius);
@@ -166,13 +189,56 @@ fn drawBolt(state: *State) void {
     const ps_tail_2 = tail_2.draw(buffer[(ps.len + ps_tail_1.len)..]);
     drawPoints(state, ps_tail_2, green);
 
-    //draw dirc
-    const dirc: Line = .{
-        .p = bolt.head_pos.round(),
-        .q = bolt.head_pos.add(head_dirc).round(),
+    const avg_tail: CubicSpline = .{
+        .p0 = tail_1.p0.toFloat().add(tail_2.p0.toFloat()).scale(0.5).round(),
+        .p1 = tail_1.p1.toFloat().add(tail_2.p1.toFloat()).scale(0.5).round(),
+        .p2 = tail_1.p2.toFloat().add(tail_2.p2.toFloat()).scale(0.5).round(),
+        .p3 = tail_1.p3.toFloat().add(tail_2.p3.toFloat()).scale(0.5).round(),
     };
-    const ps_dirc = dirc.draw(buffer[(ps.len + ps_tail_1.len + ps_tail_2.len)..]);
-    drawPoints(state, ps_dirc, .{ .red = 255, .green = 0, .blue = 0, .a = 0 });
+    const interior_point = avg_tail.evaluate(0.3);
+
+    if (state.game.fill_index >= 30_000) {
+        state.game.fill_index = 1;
+        @memset(state.game.fill_space[0..], 0);
+    }
+    for (buffer[0..(ps.len)]) |point| {
+        const index = getIndex(point) catch continue;
+        state.game.fill_space[index] = state.game.fill_index;
+    }
+    const free_buffer = buffer[(ps.len + ps_tail_1.len + ps_tail_2.len)..];
+    const circle_fill = FloodFill.fill(
+        circle.p,
+        state.game.fill_index,
+        state.game.fill_space[0..],
+        world_size,
+        free_buffer,
+    );
+    for (buffer[ps.len..(ps.len + ps_tail_1.len + ps_tail_2.len)]) |point| {
+        const index = getIndex(point) catch continue;
+        state.game.fill_space[index] = state.game.fill_index;
+    }
+    //const red: Color = .{ .red = 255, .green = 0, .blue = 0, .a = 0 };
+    //var blah = [1]Vector2I{interior_point};
+
+    const tail_fill = FloodFill.fill(
+        interior_point,
+        state.game.fill_index,
+        state.game.fill_space[0..],
+        world_size,
+        free_buffer[circle_fill..],
+    );
+    state.game.fill_index += 1;
+    //drawPoints(state: *State, ps: []Vector2I, color: Color)
+
+    //draw dirc
+    //const dirc: Line = .{
+    //    .p = bolt.head_pos.round(),
+    //    .q = bolt.head_pos.add(head_dirc).round(),
+    //};
+    //const ps_dirc = dirc.draw(buffer[(ps.len + ps_tail_1.len + ps_tail_2.len)..]);
+    //drawPoints(state, ps_dirc, .{ .red = 255, .green = 0, .blue = 0, .a = 0 });
+    drawPoints(state, buffer[0..((ps.len + ps_tail_1.len + ps_tail_2.len) + circle_fill + tail_fill)], green);
+    //drawPoints(state, blah[0..], red);
 }
 
 fn drawCircle(state: *State) void {
@@ -437,12 +503,16 @@ const GameState = struct {
     last_time: f64,
     dt: f32,
     dt_phys: f32,
+    logic_layer: [world_size.x * world_size.y]Logic,
+    fill_space: [world_size.x * world_size.y]u16,
+    fill_index: u16 = 1,
 };
 
 const State = struct {
     render: BaseGraphicsState,
     gfx: ScreenState,
     game: GameState,
+    trans_alloc: std.mem.Allocator,
 
     fn init(allc: std.mem.Allocator) !*State {
         return allc.create(State);
@@ -465,13 +535,13 @@ const getIndexErr = error{
     outOfRange,
 };
 
-fn getIndex(pos: Vector2I, size: Vector2I) !u32 {
+fn getIndex(pos: Vector2I) !u32 {
     if (pos.x < 0 or pos.y < 0)
         return getIndexErr.outOfRange;
-    if (pos.x >= size.x or pos.y >= size.y)
+    if (pos.x >= world_size.x or pos.y >= world_size.y)
         return getIndexErr.outOfRange;
     return @as(u32, @intCast(pos.y)) *
-        @as(u32, @intCast(size.x)) +
+        @as(u32, @intCast(world_size.x)) +
         @as(u32, @intCast(pos.x));
 }
 
@@ -556,8 +626,7 @@ fn update(state: *State) void {
     state.game.pos.x += 1;
     if (state.game.pos.x == state.gfx.width)
         state.game.pos.x = 0;
-    const size: Vector2I = .{ .x = state.gfx.width, .y = state.gfx.height };
-    const index: u32 = getIndex(state.game.pos, size) catch {
+    const index: u32 = getIndex(state.game.pos) catch {
         std.debug.print("oof ({}, {}) \n", .{ state.game.pos.x, state.game.pos.y });
         return;
     };
